@@ -7,7 +7,8 @@ import {
   CheckCircle,
   Loader2,
   Circle,
-  AlertCircle
+  AlertCircle,
+  ImageIcon
 } from 'lucide-react';
 import type { AgentType, AgentStatus } from '@/lib/types';
 
@@ -29,6 +30,12 @@ const AGENT_CONFIG: Record<AgentType, {
     description: '인간적인 글쓰기',
     color: 'text-blue-400',
   },
+  illustrator: {
+    icon: ImageIcon,
+    name: '삽화가',
+    description: 'AI 이미지 생성',
+    color: 'text-pink-400',
+  },
   editor: {
     icon: FileEdit,
     name: '교정자',
@@ -45,10 +52,11 @@ const AGENT_CONFIG: Record<AgentType, {
 
 interface AgentProgressProps {
   agents: AgentStatus[];
+  imageProgress?: { current: number; total: number } | null;
 }
 
-export default function AgentProgress({ agents }: AgentProgressProps) {
-  const agentOrder: AgentType[] = ['strategist', 'writer', 'editor', 'reviewer'];
+export default function AgentProgress({ agents, imageProgress }: AgentProgressProps) {
+  const agentOrder: AgentType[] = ['strategist', 'writer', 'illustrator', 'editor', 'reviewer'];
 
   return (
     <div className="bg-gray-900/50 rounded-xl p-6 border border-gray-800">
@@ -119,6 +127,21 @@ export default function AgentProgress({ agents }: AgentProgressProps) {
                     }`}>
                       {status.message}
                     </p>
+                  )}
+
+                  {/* 이미지 생성 진행률 바 */}
+                  {agentType === 'illustrator' && imageProgress && status?.status === 'running' && (
+                    <div className="mt-2">
+                      <div className="w-full bg-gray-700 rounded-full h-1.5">
+                        <div
+                          className="bg-pink-500 h-1.5 rounded-full transition-all duration-500"
+                          style={{ width: `${(imageProgress.current / imageProgress.total) * 100}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        이미지 {imageProgress.current}/{imageProgress.total} 생성 중
+                      </p>
+                    </div>
                   )}
                 </div>
 

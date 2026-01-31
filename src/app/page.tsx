@@ -5,6 +5,7 @@ import { Bot, Zap, Shield, Sparkles } from 'lucide-react';
 import TopicInput from '@/components/TopicInput';
 import AgentProgress from '@/components/AgentProgress';
 import ResultPreview from '@/components/ResultPreview';
+import WordPressConfig, { type WordPressSettings } from '@/components/WordPressConfig';
 import type { AgentStatus, AgentType } from '@/lib/types';
 
 interface GenerationResult {
@@ -24,12 +25,15 @@ export default function Home() {
   const [agents, setAgents] = useState<AgentStatus[]>([]);
   const [result, setResult] = useState<GenerationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wordpressConfig, setWordpressConfig] = useState<WordPressSettings | null>(null);
+  const [imageProgress, setImageProgress] = useState<{ current: number; total: number } | null>(null);
 
   const handleGenerate = useCallback(async (topic: string, keywords: string[]) => {
     setIsLoading(true);
     setAgents([]);
     setResult(null);
     setError(null);
+    setImageProgress(null);
 
     try {
       const response = await fetch('/api/generate', {
@@ -80,8 +84,11 @@ export default function Home() {
                     },
                   ];
                 });
+              } else if (data.type === 'image-progress') {
+                setImageProgress(data.imageProgress);
               } else if (data.type === 'complete') {
                 setResult(data.data);
+                setImageProgress(null);
               } else if (data.type === 'error') {
                 setError(data.message);
               }
@@ -126,7 +133,7 @@ export default function Home() {
               </span>
             </h2>
             <p className="text-gray-400 max-w-2xl mx-auto mb-8">
-              4단계 멀티 에이전트 워크플로우가 SEO 최적화된 고품질 콘텐츠를 생성합니다.
+              5단계 멀티 에이전트 워크플로우가 SEO 최적화된 고품질 콘텐츠와 이미지를 생성합니다.
               AI 특유의 딱딱함 없이, 사람이 쓴 것처럼 자연스러운 글을 만들어보세요.
             </p>
 
@@ -134,13 +141,13 @@ export default function Home() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
               <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700">
                 <Zap className="w-8 h-8 text-yellow-400 mx-auto mb-2" />
-                <h3 className="font-medium text-white mb-1">4단계 AI 파이프라인</h3>
-                <p className="text-sm text-gray-400">전략-작성-교정-검수</p>
+                <h3 className="font-medium text-white mb-1">5단계 AI 파이프라인</h3>
+                <p className="text-sm text-gray-400">전략-작성-삽화-교정-검수</p>
               </div>
               <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700">
                 <Sparkles className="w-8 h-8 text-purple-400 mx-auto mb-2" />
-                <h3 className="font-medium text-white mb-1">인간적인 글쓰기</h3>
-                <p className="text-sm text-gray-400">개성 있는 문체와 의견</p>
+                <h3 className="font-medium text-white mb-1">AI 이미지 자동 생성</h3>
+                <p className="text-sm text-gray-400">DALL-E 3 고품질 이미지</p>
               </div>
               <div className="p-4 bg-gray-800/50 rounded-xl border border-gray-700">
                 <Shield className="w-8 h-8 text-green-400 mx-auto mb-2" />
@@ -164,7 +171,7 @@ export default function Home() {
 
             {/* 진행 상황 */}
             {(isLoading || agents.length > 0) && (
-              <AgentProgress agents={agents} />
+              <AgentProgress agents={agents} imageProgress={imageProgress} />
             )}
 
             {/* 에러 메시지 */}
@@ -173,6 +180,9 @@ export default function Home() {
                 <p className="text-red-400">{error}</p>
               </div>
             )}
+
+            {/* 워드프레스 연동 */}
+            <WordPressConfig onConfigChange={setWordpressConfig} />
           </div>
 
           {/* 오른쪽: 결과 미리보기 */}
@@ -183,6 +193,7 @@ export default function Home() {
                 approved={result.approved}
                 compliance={result.adsenseCompliance}
                 suggestions={result.suggestions}
+                wordpressConfig={wordpressConfig}
               />
             ) : (
               <div className="bg-gray-900/30 rounded-xl border border-gray-800 border-dashed p-12 flex flex-col items-center justify-center text-center min-h-[400px]">
@@ -202,7 +213,7 @@ export default function Home() {
         {!result && !isLoading && (
           <div className="mt-12 p-6 bg-gray-900/30 rounded-xl border border-gray-800">
             <h3 className="font-semibold text-gray-300 mb-4">에이전트 워크플로우</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 text-sm">
               <div className="flex items-start gap-3">
                 <span className="flex-shrink-0 w-6 h-6 rounded-full bg-purple-900/50 text-purple-400 flex items-center justify-center text-xs font-bold">A</span>
                 <div>
@@ -218,14 +229,21 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-yellow-900/50 text-yellow-400 flex items-center justify-center text-xs font-bold">C</span>
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-pink-900/50 text-pink-400 flex items-center justify-center text-xs font-bold">C</span>
+                <div>
+                  <p className="font-medium text-gray-300">삽화가</p>
+                  <p className="text-gray-500">DALL-E 3 이미지 생성 및 배치</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-yellow-900/50 text-yellow-400 flex items-center justify-center text-xs font-bold">D</span>
                 <div>
                   <p className="font-medium text-gray-300">교정자</p>
                   <p className="text-gray-500">반복 제거, 유의어 교체, 가독성 향상</p>
                 </div>
               </div>
               <div className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-green-900/50 text-green-400 flex items-center justify-center text-xs font-bold">D</span>
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-green-900/50 text-green-400 flex items-center justify-center text-xs font-bold">E</span>
                 <div>
                   <p className="font-medium text-gray-300">검수자</p>
                   <p className="text-gray-500">애드센스 정책 검토, 최종 마크다운 생성</p>

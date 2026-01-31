@@ -3,10 +3,11 @@ import {
   runStrategist,
   runWriter,
   runEditor,
-  runReviewer
+  runReviewer,
+  runIllustrator
 } from '@/lib/agents/agent-runner';
 import { AGENT_NAMES, AGENT_DESCRIPTIONS } from '@/lib/agents/prompts';
-import type { AgentType, StrategyOutput } from '@/lib/types';
+import type { AgentType, StrategyOutput, WriterOutput } from '@/lib/types';
 
 // 스트리밍 응답을 위한 헬퍼
 function createSSEMessage(data: object): string {
@@ -99,7 +100,50 @@ export async function POST(request: NextRequest) {
             throw err;
           }
 
-          // 에이전트 C: 교정자
+          // 에이전트 C: 삽화가 (NEW)
+          send({
+            type: 'status',
+            agent: 'illustrator' as AgentType,
+            status: 'running',
+            message: `${AGENT_NAMES.illustrator}: ${AGENT_DESCRIPTIONS.illustrator}`,
+          });
+
+          let illustrated;
+          try {
+            illustrated = await runIllustrator(
+              draft as WriterOutput,
+              strategy,
+              (current, total) => {
+                send({
+                  type: 'image-progress',
+                  agent: 'illustrator' as AgentType,
+                  imageProgress: { current, total },
+                  message: `이미지 생성 중... (${current}/${total})`,
+                });
+              }
+            );
+            send({
+              type: 'output',
+              agent: 'illustrator' as AgentType,
+              data: { imagesGenerated: illustrated.imagesGenerated },
+            });
+            send({
+              type: 'status',
+              agent: 'illustrator' as AgentType,
+              status: 'completed',
+              message: `${AGENT_NAMES.illustrator}: ${illustrated.imagesGenerated}개 이미지 생성 완료`,
+            });
+          } catch (err) {
+            send({
+              type: 'status',
+              agent: 'illustrator' as AgentType,
+              status: 'error',
+              message: `삽화가 오류: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+            });
+            throw err;
+          }
+
+          // 에이전트 D: 교정자
           send({
             type: 'status',
             agent: 'editor' as AgentType,
@@ -109,7 +153,7 @@ export async function POST(request: NextRequest) {
 
           let edited;
           try {
-            edited = await runEditor(draft.content);
+            edited = await runEditor(illustrated.content);
             send({
               type: 'status',
               agent: 'editor' as AgentType,
@@ -126,7 +170,7 @@ export async function POST(request: NextRequest) {
             throw err;
           }
 
-          // 에이전트 D: 검수자
+          // 에이전트 E: 검수자
           send({
             type: 'status',
             agent: 'reviewer' as AgentType,

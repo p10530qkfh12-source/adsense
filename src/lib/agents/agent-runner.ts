@@ -1,11 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { AGENT_PROMPTS } from './prompts';
+import { runIllustrator } from './illustrator';
 import type {
   AgentType,
   StrategyOutput,
   WriterOutput,
   EditorOutput,
-  ReviewerOutput
+  ReviewerOutput,
+  IllustratorOutput
 } from '../types';
 
 // Anthropic 클라이언트 초기화
@@ -57,9 +59,12 @@ ${keywords?.length ? `추가 키워드: ${keywords.join(', ')}` : ''}
   return parseJSON<StrategyOutput>(content.text);
 }
 
+// 최소 글자 수 상수
+const MIN_CONTENT_LENGTH = 1500;
+
 // 에이전트 B: 작가 실행
 export async function runWriter(strategy: StrategyOutput): Promise<WriterOutput> {
-  const userMessage = `
+  const buildPrompt = (isRetry: boolean, currentLength?: number) => `
 ## 콘텐츠 전략
 - 검색 의도: ${strategy.searchIntent}
 - 타겟 독자: ${strategy.targetAudience}
@@ -79,22 +84,57 @@ ${section.points.map(p => `- ${p}`).join('\n')}
 ${strategy.outline.conclusion.map(p => `- ${p}`).join('\n')}
 
 위 구조를 바탕으로 인간적이고 자연스러운 블로그 포스트를 작성해주세요.
-문장 길이를 다양하게 하고, 개인적인 의견도 포함하며, 독자와 대화하듯 써주세요.
+
+## ⚠️ 필수 요구사항 (반드시 준수!)
+${isRetry ? `
+**[경고] 이전 작성 분량이 ${currentLength}자로 최소 기준(1500자)에 미달했습니다.**
+**이번에는 반드시 1500자 이상으로 작성해주세요!**
+` : ''}
+1. **⛔ 반드시 최소 1500자 이상, 권장 2000~3000자로 작성해주세요** (필수!)
+2. 문장 길이를 다양하게 하고, 개인적인 의견도 포함해주세요
+3. 독자와 대화하듯 친근하게 써주세요
+4. 각 섹션마다 구체적인 예시와 팁을 풍부하게 포함해주세요
+5. 서론에서 독자의 공감을 이끌어내고, 결론에서 핵심을 정리해주세요
+6. 각 본론 섹션은 최소 300자 이상으로 작성해주세요
 `;
 
-  const response = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 4000,
-    system: AGENT_PROMPTS.writer,
-    messages: [{ role: 'user', content: userMessage }]
-  });
+  // 최대 2번 시도 (처음 + 재시도 1회)
+  let attempts = 0;
+  const maxAttempts = 2;
+  let text = '';
 
-  const content = response.content[0];
-  if (content.type !== 'text') {
-    throw new Error('예상치 못한 응답 형식');
+  while (attempts < maxAttempts) {
+    const isRetry = attempts > 0;
+    const userMessage = buildPrompt(isRetry, isRetry ? text.length : undefined);
+
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 6000,
+      system: AGENT_PROMPTS.writer,
+      messages: [{ role: 'user', content: userMessage }]
+    });
+
+    const content = response.content[0];
+    if (content.type !== 'text') {
+      throw new Error('예상치 못한 응답 형식');
+    }
+
+    text = content.text;
+    attempts++;
+
+    // 1500자 이상이면 성공
+    if (text.length >= MIN_CONTENT_LENGTH) {
+      break;
+    }
+
+    console.log(`작가 에이전트: ${text.length}자 작성됨 (최소 ${MIN_CONTENT_LENGTH}자 필요), 재시도 ${attempts}/${maxAttempts}`);
   }
 
-  const text = content.text;
+  // 최종 검증
+  if (text.length < MIN_CONTENT_LENGTH) {
+    console.warn(`경고: 최종 글 분량이 ${text.length}자로 최소 기준(${MIN_CONTENT_LENGTH}자) 미달`);
+  }
+
   return {
     content: text,
     wordCount: text.length
@@ -118,7 +158,7 @@ ${draft}
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 4000,
+    max_tokens: 6000,
     system: AGENT_PROMPTS.editor,
     messages: [{ role: 'user', content: userMessage }]
   });
@@ -139,24 +179,31 @@ export async function runReviewer(
   content: string,
   strategy: StrategyOutput
 ): Promise<ReviewerOutput> {
+  const contentLength = content.length;
   const userMessage = `
 ## 원래 전략
 - 검색 의도: ${strategy.searchIntent}
 - 타겟 독자: ${strategy.targetAudience}
 - 메타 설명: ${strategy.metaDescription}
 
-## 검토할 콘텐츠
+## 검토할 콘텐츠 (현재 ${contentLength}자)
 ${content}
 
 ---
 
 위 콘텐츠가 구글 애드센스 정책에 부합하는지 검토하고, 최종 마크다운을 생성해주세요.
+
+## ⚠️ 글자 수 검증 (필수)
+- 현재 콘텐츠: ${contentLength}자
+- 최소 기준: ${MIN_CONTENT_LENGTH}자
+- ${contentLength >= MIN_CONTENT_LENGTH ? '✅ 분량 기준 충족' : '⛔ 분량 기준 미달 - properLength: false, approved: false 처리 필요'}
+
 JSON 형식으로 출력해주세요.
 `;
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 5000,
+    max_tokens: 8000,
     system: AGENT_PROMPTS.reviewer,
     messages: [{ role: 'user', content: userMessage }]
   });
@@ -166,11 +213,28 @@ JSON 형식으로 출력해주세요.
     throw new Error('예상치 못한 응답 형식');
   }
 
-  return parseJSON<ReviewerOutput>(responseContent.text);
+  const result = parseJSON<ReviewerOutput>(responseContent.text);
+
+  // 최종 분량 검증: 1500자 미만이면 강제로 거부
+  const finalLength = result.markdown.length;
+  if (finalLength < MIN_CONTENT_LENGTH) {
+    result.approved = false;
+    result.adsenseCompliance.properLength = false;
+    if (!result.suggestions) {
+      result.suggestions = [];
+    }
+    result.suggestions.unshift(`글 분량이 ${finalLength}자로 최소 기준(${MIN_CONTENT_LENGTH}자)에 미달합니다.`);
+  }
+
+  return result;
 }
 
 // 전체 파이프라인 실행 (스트리밍용)
-export type AgentCallback = (agent: AgentType, status: 'start' | 'complete', data?: unknown) => void;
+export type AgentCallback = (
+  agent: AgentType,
+  status: 'start' | 'complete' | 'image-progress',
+  data?: unknown
+) => void;
 
 export async function runPipeline(
   topic: string,
@@ -187,15 +251,26 @@ export async function runPipeline(
   const draft = await runWriter(strategy);
   onProgress('writer', 'complete', draft);
 
-  // 3. 교정자
+  // 3. 삽화가 (NEW)
+  onProgress('illustrator', 'start');
+  const illustrated = await runIllustrator(draft, strategy, (current, total) => {
+    onProgress('illustrator', 'image-progress', { current, total });
+  });
+  onProgress('illustrator', 'complete', illustrated);
+
+  // 4. 교정자 (이미지 포함된 콘텐츠 사용)
   onProgress('editor', 'start');
-  const edited = await runEditor(draft.content);
+  const edited = await runEditor(illustrated.content);
   onProgress('editor', 'complete', edited);
 
-  // 4. 검수자
+  // 5. 검수자
   onProgress('reviewer', 'start');
   const final = await runReviewer(edited.content, strategy);
   onProgress('reviewer', 'complete', final);
 
   return final;
 }
+
+// 삽화가 함수 재export (API 라우트에서 사용)
+export { runIllustrator };
+export type { IllustratorOutput };
